@@ -8,30 +8,45 @@ export default function HeroSection() {
   const [showWidgets, setShowWidgets] = useState(false);
   
   // 影片輪播狀態
-  const videos = ['/video/home1.mp4', '/video/home2.mp4', '/video/home3.mp4'];
-  const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
+  const videos = ['/video/home1.mp4', '/video/home2.mp4'];
+  // ★ 修改處 2: 將預設值設為 null，避免 SSR 報錯，等待客戶端載入後再隨機選取 ★
+  const [currentVideoIndex, setCurrentVideoIndex] = useState<number | null>(null);
 
   // Logo 文字與狀態
   const logoText = "holyping".split("");
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
 
-  // ★ 主 Logo 效果參數設定 ★
+  // 主 Logo 效果參數設定
   const baseScale = 1;
   const hoverScale = 1.3;
   const neighborScale = 1.1;
   const pushOffset = 22;
 
   useEffect(() => {
-    // 1.5 秒後顯示底部 Widgets
+    // ★ 初始載入時，隨機決定第一支播放的影片 ★
+    setCurrentVideoIndex(Math.floor(Math.random() * videos.length));
+
+    // 1.5 秒後顯示底部 Widgets、Logo 上移，並讓背景影片漸漸浮現
     const timer = setTimeout(() => {
       setShowWidgets(true);
     }, 1500);
 
     return () => clearTimeout(timer);
-  }, []);
+  }, [videos.length]);
 
   const handleVideoEnd = () => {
-    setCurrentVideoIndex((prev) => (prev + 1) % videos.length);
+    // ★ 影片結束時，隨機選取下一支影片 ★
+    setCurrentVideoIndex((prev) => {
+      if (prev === null) return 0;
+      if (videos.length <= 1) return prev; // 只有一支影片就不切換
+      
+      let nextIndex = Math.floor(Math.random() * videos.length);
+      // 確保抽出來的影片跟上一支不同，才能有切換的視覺效果
+      while (nextIndex === prev) {
+        nextIndex = Math.floor(Math.random() * videos.length);
+      }
+      return nextIndex;
+    });
   };
 
   const widgets = [
@@ -45,18 +60,26 @@ export default function HeroSection() {
     <section className="relative flex flex-col items-center justify-center min-h-screen bg-black text-white overflow-hidden font-mono">
       
       {/* 1. 多影片輪播背景與暗色遮罩 */}
-      <div className="absolute inset-0 z-0 w-full h-full pointer-events-none">
-        <div className="absolute inset-0 bg-black/85 z-10" />
-        <video 
-          key={videos[currentVideoIndex]} 
-          autoPlay 
-          muted 
-          playsInline
-          onEnded={handleVideoEnd}
-          className="absolute inset-0 w-full h-full object-cover z-0 opacity-30 grayscale transition-opacity duration-1000"
-        >
-          <source src={videos[currentVideoIndex]} type="video/mp4" />
-        </video>
+      <div className="absolute inset-0 z-0 w-full h-full pointer-events-none bg-black">
+        {/* ★ 修改處 1: 將背景遮罩稍微調暗 (從 bg-black/60 改為 bg-black/75) ★ */}
+        <div className="absolute inset-0 bg-black/75 z-10 transition-opacity duration-1000" />
+        
+        {/* 確保隨機 index 決定後才渲染 video */}
+        {currentVideoIndex !== null && (
+          <video 
+            key={videos[currentVideoIndex]} 
+            autoPlay 
+            muted 
+            playsInline
+            onEnded={handleVideoEnd}
+            // ★ 修改處 3: 初始化時是 opacity-0 (全黑)，等到 showWidgets 為 true 時，花 2 秒鐘 (duration-[2000ms]) 慢慢浮現到 opacity-50 ★
+            className={`absolute inset-0 w-full h-full object-cover z-0 grayscale transition-opacity duration-[2000ms] ease-in-out ${
+              showWidgets ? 'opacity-50' : 'opacity-0'
+            }`}
+          >
+            <source src={videos[currentVideoIndex]} type="video/mp4" />
+          </video>
+        )}
       </div>
 
       {/* 2. Logo 區塊與副標題 */}
@@ -64,7 +87,7 @@ export default function HeroSection() {
         initial={{ opacity: 0, y: 20 }}
         animate={{ 
           opacity: 1, 
-          y: showWidgets ? -120 : 0 
+          y: showWidgets ? -80 : 0 
         }}
         transition={{ duration: 1, ease: "easeInOut" }}
         className="relative z-20 flex flex-col items-center cursor-default"
@@ -127,12 +150,12 @@ export default function HeroSection() {
           })}
         </div>
 
-        {/* 平台敘述副標題 (★ 柔光點亮逐字效果 ★) */}
+        {/* 平台敘述副標題 (柔光點亮逐字效果) */}
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 1, delay: 1 }}
-          className="flex justify-center text-xs md:text-sm text-zinc-500 tracking-[0.3em] md:tracking-[0.6em] uppercase text-center max-w-2xl px-4"
+          className="flex justify-between w-full px-12 text-sm md:text-base text-zinc-500 uppercase font-medium"
         >
           {"全方位網路基礎設施整合與公開資訊平台".split("").map((char, index) => (
             <motion.span
@@ -177,11 +200,9 @@ export default function HeroSection() {
                 focus:outline-none focus:ring-1 focus:ring-zinc-400 focus:border-zinc-400
               "
             >
-              {/* 頂部極細裝飾線 */}
               <div className="absolute top-0 left-0 w-8 h-[2px] bg-zinc-800 group-hover:bg-zinc-300 group-focus:bg-zinc-300 transition-colors duration-300" />
               
               <div className="flex flex-col">
-                {/* ★ 標題 (Signal) 倒過來放在上面，加大字型 ★ */}
                 <div className="flex flex-wrap text-xl md:text-2xl font-bold text-zinc-200 group-hover:text-white group-focus:text-white mb-2">
                   {widget.title.split("").map((char, charIdx) => (
                     <motion.span
@@ -195,9 +216,7 @@ export default function HeroSection() {
                   ))}
                 </div>
                 
-                {/* ★ 描述 (Real-time...) 倒過來放在下面，並處理英文換行 ★ */}
                 <div className="flex flex-wrap leading-relaxed text-[10px] md:text-xs text-zinc-500 group-hover:text-zinc-400 group-focus:text-zinc-400">
-                  {/* 先用空白切單字，再切字母，確保英文單字在 flex-wrap 時不會從中間被切斷 */}
                   {widget.desc.split(" ").map((word, wordIdx) => (
                     <span key={wordIdx} className="inline-flex mr-1 mb-1">
                       {word.split("").map((char, charIdx) => (
@@ -215,7 +234,6 @@ export default function HeroSection() {
                 </div>
               </div>
               
-              {/* 代表前往的箭頭 */}
               <div className="w-full flex justify-end items-center pt-2">
                 <svg 
                   className="w-5 h-5 text-zinc-600 group-hover:text-white group-focus:text-white transform group-hover:translate-x-1 group-focus:translate-x-1 transition-all duration-300 ease-out" 

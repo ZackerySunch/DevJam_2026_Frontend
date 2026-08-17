@@ -3,13 +3,17 @@
 
 import { motion } from 'framer-motion';
 import { useState, useEffect } from 'react';
+// ★ 新增：引入 Next.js 的 useRouter 來處理路由跳轉 ★
+import { useRouter } from 'next/navigation';
 
 export default function HeroSection() {
   const [showWidgets, setShowWidgets] = useState(false);
   
+  // ★ 新增：初始化 router ★
+  const router = useRouter();
+  
   // 影片輪播狀態
   const videos = ['/video/home1.mp4', '/video/home2.mp4'];
-  // ★ 修改處 2: 將預設值設為 null，避免 SSR 報錯，等待客戶端載入後再隨機選取 ★
   const [currentVideoIndex, setCurrentVideoIndex] = useState<number | null>(null);
 
   // Logo 文字與狀態
@@ -23,7 +27,7 @@ export default function HeroSection() {
   const pushOffset = 22;
 
   useEffect(() => {
-    // ★ 初始載入時，隨機決定第一支播放的影片 ★
+    // 初始載入時，隨機決定第一支播放的影片
     setCurrentVideoIndex(Math.floor(Math.random() * videos.length));
 
     // 1.5 秒後顯示底部 Widgets、Logo 上移，並讓背景影片漸漸浮現
@@ -35,7 +39,7 @@ export default function HeroSection() {
   }, [videos.length]);
 
   const handleVideoEnd = () => {
-    // ★ 影片結束時，隨機選取下一支影片 ★
+    // 影片結束時，隨機選取下一支影片
     setCurrentVideoIndex((prev) => {
       if (prev === null) return 0;
       if (videos.length <= 1) return prev; // 只有一支影片就不切換
@@ -61,7 +65,6 @@ export default function HeroSection() {
       
       {/* 1. 多影片輪播背景與暗色遮罩 */}
       <div className="absolute inset-0 z-0 w-full h-full pointer-events-none bg-black">
-        {/* ★ 修改處 1: 將背景遮罩稍微調暗 (從 bg-black/60 改為 bg-black/75) ★ */}
         <div className="absolute inset-0 bg-black/75 z-10 transition-opacity duration-1000" />
         
         {/* 確保隨機 index 決定後才渲染 video */}
@@ -72,7 +75,6 @@ export default function HeroSection() {
             muted 
             playsInline
             onEnded={handleVideoEnd}
-            // ★ 修改處 3: 初始化時是 opacity-0 (全黑)，等到 showWidgets 為 true 時，花 2 秒鐘 (duration-[2000ms]) 慢慢浮現到 opacity-50 ★
             className={`absolute inset-0 w-full h-full object-cover z-0 grayscale transition-opacity duration-[2000ms] ease-in-out ${
               showWidgets ? 'opacity-50' : 'opacity-0'
             }`}
@@ -186,6 +188,8 @@ export default function HeroSection() {
           {widgets.map((widget, index) => (
             <motion.button
               key={index}
+              // ★ 新增：點擊時觸發路由跳轉，利用 toLowerCase() 將 Title 轉為小寫路由 ★
+              onClick={() => router.push(`/${widget.title.toLowerCase()}`)}
               whileHover={{ y: -4, scale: 1.01 }}
               whileTap={{ scale: 0.98 }}
               initial={{ opacity: 0, y: 30 }}

@@ -8,12 +8,12 @@ import { useRouter } from 'next/navigation';
 
 export default function HeroSection() {
   const [showWidgets, setShowWidgets] = useState(false);
-  
+
   // ★ 新增：初始化 router ★
   const router = useRouter();
-  
+
   // 影片輪播狀態
-  const videos = ['/video/home1.mp4', '/video/home2.mp4'];
+  const videos = ['/video/home1.mp4', '/video/home2.mp4', '/video/home3.mp4'];
   const [currentVideoIndex, setCurrentVideoIndex] = useState<number | null>(null);
 
   // Logo 文字與狀態
@@ -43,7 +43,7 @@ export default function HeroSection() {
     setCurrentVideoIndex((prev) => {
       if (prev === null) return 0;
       if (videos.length <= 1) return prev; // 只有一支影片就不切換
-      
+
       let nextIndex = Math.floor(Math.random() * videos.length);
       // 確保抽出來的影片跟上一支不同，才能有切換的視覺效果
       while (nextIndex === prev) {
@@ -62,22 +62,21 @@ export default function HeroSection() {
 
   return (
     <section className="relative flex flex-col items-center justify-center min-h-screen bg-black text-white overflow-hidden font-mono">
-      
+
       {/* 1. 多影片輪播背景與暗色遮罩 */}
       <div className="absolute inset-0 z-0 w-full h-full pointer-events-none bg-black">
         <div className="absolute inset-0 bg-black/75 z-10 transition-opacity duration-1000" />
-        
+
         {/* 確保隨機 index 決定後才渲染 video */}
         {currentVideoIndex !== null && (
-          <video 
-            key={videos[currentVideoIndex]} 
-            autoPlay 
-            muted 
+          <video
+            key={videos[currentVideoIndex]}
+            autoPlay
+            muted
             playsInline
             onEnded={handleVideoEnd}
-            className={`absolute inset-0 w-full h-full object-cover z-0 grayscale transition-opacity duration-[2000ms] ease-in-out ${
-              showWidgets ? 'opacity-50' : 'opacity-0'
-            }`}
+            className={`absolute inset-0 w-full h-full object-cover z-0 grayscale transition-opacity duration-[2000ms] ease-in-out ${showWidgets ? 'opacity-50' : 'opacity-0'
+              }`}
           >
             <source src={videos[currentVideoIndex]} type="video/mp4" />
           </video>
@@ -87,15 +86,15 @@ export default function HeroSection() {
       {/* 2. Logo 區塊與副標題 */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
-        animate={{ 
-          opacity: 1, 
-          y: showWidgets ? -80 : 0 
+        animate={{
+          opacity: 1,
+          y: showWidgets ? -80 : 0
         }}
         transition={{ duration: 1, ease: "easeInOut" }}
         className="relative z-20 flex flex-col items-center cursor-default"
       >
         {/* 主 Logo 容器 */}
-        <div 
+        <div
           className="flex items-end mb-6 px-12 select-none"
           onMouseLeave={() => setHoveredIndex(null)}
         >
@@ -120,17 +119,17 @@ export default function HeroSection() {
               <motion.span
                 key={index}
                 initial={{ opacity: 0, y: 10 }}
-                animate={{ 
-                  opacity: 1, 
+                animate={{
+                  opacity: 1,
                   y: 0,
                   x: offsetX,
                   scale: targetScale,
-                  color: isSelf ? '#ffffff' : (isNeighbor ? '#a1a1aa' : '#52525b'), 
-                  textShadow: isSelf 
-                    ? "0px 0px 20px rgba(255, 255, 255, 0.7), 0px 0px 40px rgba(255, 255, 255, 0.3)" 
+                  color: isSelf ? '#ffffff' : (isNeighbor ? '#a1a1aa' : '#52525b'),
+                  textShadow: isSelf
+                    ? "0px 0px 20px rgba(255, 255, 255, 0.7), 0px 0px 40px rgba(255, 255, 255, 0.3)"
                     : isNeighbor
                       ? "0px 0px 10px rgba(255, 255, 255, 0.2)"
-                      : "0px 0px 0px rgba(255, 255, 255, 0)", 
+                      : "0px 0px 0px rgba(255, 255, 255, 0)",
                 }}
                 transition={{
                   x: { type: "spring", stiffness: 400, damping: 30 },
@@ -162,11 +161,11 @@ export default function HeroSection() {
           {"全方位網路基礎設施整合與公開資訊平台".split("").map((char, index) => (
             <motion.span
               key={index}
-              whileHover={{ 
-                y: -4, 
-                color: "#ffffff", 
+              whileHover={{
+                y: -4,
+                color: "#ffffff",
                 scale: 1.15,
-                textShadow: "0px 0px 12px rgba(255, 255, 255, 0.6)" 
+                textShadow: "0px 0px 12px rgba(255, 255, 255, 0.6)"
               }}
               transition={{ type: "spring", stiffness: 500, damping: 15 }}
               className="inline-block cursor-default transition-colors duration-200"
@@ -205,7 +204,7 @@ export default function HeroSection() {
               "
             >
               <div className="absolute top-0 left-0 w-8 h-[2px] bg-zinc-800 group-hover:bg-zinc-300 group-focus:bg-zinc-300 transition-colors duration-300" />
-              
+
               <div className="flex flex-col">
                 <div className="flex flex-wrap text-xl md:text-2xl font-bold text-zinc-200 group-hover:text-white group-focus:text-white mb-2">
                   {widget.title.split("").map((char, charIdx) => (
@@ -219,7 +218,7 @@ export default function HeroSection() {
                     </motion.span>
                   ))}
                 </div>
-                
+
                 <div className="flex flex-wrap leading-relaxed text-[10px] md:text-xs text-zinc-500 group-hover:text-zinc-400 group-focus:text-zinc-400">
                   {widget.desc.split(" ").map((word, wordIdx) => (
                     <span key={wordIdx} className="inline-flex mr-1 mb-1">
@@ -237,13 +236,13 @@ export default function HeroSection() {
                   ))}
                 </div>
               </div>
-              
+
               <div className="w-full flex justify-end items-center pt-2">
-                <svg 
-                  className="w-5 h-5 text-zinc-600 group-hover:text-white group-focus:text-white transform group-hover:translate-x-1 group-focus:translate-x-1 transition-all duration-300 ease-out" 
-                  fill="none" 
-                  viewBox="0 0 24 24" 
-                  stroke="currentColor" 
+                <svg
+                  className="w-5 h-5 text-zinc-600 group-hover:text-white group-focus:text-white transform group-hover:translate-x-1 group-focus:translate-x-1 transition-all duration-300 ease-out"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
                   strokeWidth="2"
                 >
                   <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />

@@ -4,46 +4,66 @@
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import SignalMap from './SignalMap';
-import { fetchSignalSnapshot, SignalSnapshot } from '@/services/signal';
+import SignalLog from './Signallog';
+import {
+  fetchSignalSnapshot,
+  ALL_COUNTIES,
+  SignalSnapshot,
+} from '@/services/signal';
 
-const POLL_MS = 1000;
+/** 後端每次回來的是「當下狀態」，打太密只會讓動畫來不及演完 */
+const POLL_MS = 5000;
 
 export default function SignalContainer() {
   const [snapshot, setSnapshot] = useState<SignalSnapshot | null>(null);
   const [isLive, setIsLive] = useState(true);
-  const [lastUpdate, setLastUpdate] = useState<string>('--:--:--');
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [lastUpdate, setLastUpdate] = useState('--:--:--');
+  const [error, setError] = useState<string | null>(null);
+
+  const inFlight = useRef(false);
 
   useEffect(() => {
-    let cancelled = false;
+    if (!isLive) return;
+
+    const ctrl = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let stopped = false;
 
     const tick = async () => {
-      if (!isLive || cancelled) return;
+      // 上一發還沒回來就跳過，避免慢速網路把請求疊起來
+      if (inFlight.current) return schedule();
+      inFlight.current = true;
+
       try {
-        const data = await fetchSignalSnapshot();
-        if (cancelled) return;
+        const data = await fetchSignalSnapshot(ALL_COUNTIES, ctrl.signal);
+        if (stopped) return;
         setSnapshot(data);
+        setError(null);
         setLastUpdate(
           new Date(data.timestamp).toLocaleTimeString('zh-TW', { hour12: false })
         );
-      } catch {
-        // 之後串 API 可在這裡顯示錯誤
+      } catch (e: any) {
+        if (stopped || e?.name === 'AbortError') return;
+        setError(e?.message ?? '無法連線到後端');
+      } finally {
+        inFlight.current = false;
+        schedule();
       }
     };
 
+    const schedule = () => {
+      if (stopped) return;
+      timer = setTimeout(tick, POLL_MS);
+    };
+
     tick();
-    timerRef.current = setInterval(tick, POLL_MS);
 
     return () => {
-      cancelled = true;
-      if (timerRef.current) clearInterval(timerRef.current);
+      stopped = true;
+      ctrl.abort();
+      if (timer) clearTimeout(timer);
     };
   }, [isLive]);
-
-  const topBusy = snapshot?.byCounty.slice(0, 5) ?? [];
-  const leastBusy = snapshot
-    ? [...snapshot.byCounty].sort((a, b) => a.total - b.total).slice(0, 5)
-    : [];
 
   return (
     <main className="relative w-full h-screen bg-black text-white font-mono overflow-hidden">
@@ -66,22 +86,58 @@ export default function SignalContainer() {
             Signal Flow
           </h2>
           <p className="text-zinc-400 text-sm leading-relaxed">
-            即時基地台流量流動。
+            全台骨幹即時流向。
             <br />
-            弧線粗細 = 流量強度。
+            線條粗細與顏色 = 鏈路負載。
             <br />
-            每秒從後端拉取最新快照。
+            每 {POLL_MS / 1000} 秒更新一次。
           </p>
+
+          {/* 顏色圖例 */}
+          <div className="mt-3 flex items-center gap-1.5">
+            {[
+              ['#4ADE80', '低'],
+              ['#A3E635', ''],
+              ['#FACC15', ''],
+              ['#FB923C', ''],
+              ['#F97316', '高'],
+            ].map(([c, label], i) => (
+              <div key={i} className="flex items-center gap-1">
+                <span
+                  className="inline-block rounded-full"
+                  style={{
+                    background: c,
+                    width: 6 + i * 2,
+                    height: 6 + i * 2,
+                  }}
+                />
+                {label && (
+                  <span className="text-[10px] text-zinc-500">{label}</span>
+                )}
+              </div>
+            ))}
+          </div>
+
           <div className="mt-3 flex items-center gap-2 text-xs text-zinc-500">
             <span
               className={`inline-block w-2 h-2 rounded-full ${
-                isLive ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-600'
+                error
+                  ? 'bg-red-500'
+                  : isLive
+                  ? 'bg-emerald-400 animate-pulse'
+                  : 'bg-zinc-600'
               }`}
             />
-            <span>{isLive ? 'LIVE' : 'PAUSED'}</span>
+            <span>{error ? 'ERROR' : isLive ? 'LIVE' : 'PAUSED'}</span>
             <span className="text-zinc-600">·</span>
             <span>{lastUpdate}</span>
           </div>
+
+          {error && (
+            <p className="mt-2 text-[11px] text-red-400/90 leading-relaxed break-words">
+              {error}
+            </p>
+          )}
         </div>
       </div>
 
@@ -103,70 +159,29 @@ export default function SignalContainer() {
         </button>
       </div>
 
-      {/* 右側統計 */}
-      <div className="absolute top-24 right-8 z-20 w-64 flex flex-col gap-3">
+      {/* 右側：即時事件流 */}
+      <div className="absolute top-24 right-8 bottom-8 z-20 w-[22rem] flex flex-col">
         <div
-          className="rounded-2xl p-4 border"
+          className="flex-1 min-h-0 rounded-2xl p-4 border flex flex-col"
           style={{
             background: 'rgba(8,12,20,0.92)',
             borderColor: 'rgba(80,180,255,0.15)',
             backdropFilter: 'blur(16px)',
           }}
         >
-          <div className="text-[10px] uppercase tracking-widest text-zinc-500 mb-2">
-            流量最高
+          <div className="flex items-baseline justify-between mb-3 shrink-0">
+            <div className="text-[10px] uppercase tracking-widest text-zinc-500">
+              Live feed
+            </div>
+            <div className="text-[10px] text-zinc-600 tabular-nums">
+              {snapshot ? `${snapshot.flows.length} 條 / ${POLL_MS / 1000}s` : '--'}
+            </div>
           </div>
-          <div className="space-y-1.5">
-            {topBusy.length === 0 ? (
-              <div className="text-zinc-600 text-xs">等待資料...</div>
-            ) : (
-              topBusy.map((c, i) => (
-                <div key={c.county} className="flex justify-between text-sm">
-                  <span className="text-zinc-300">
-                    <span className="text-zinc-600 mr-1.5">{i + 1}</span>
-                    {c.county}
-                  </span>
-                  <span className="text-cyan-400 font-mono text-xs">{c.total}</span>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
 
-        <div
-          className="rounded-2xl p-4 border"
-          style={{
-            background: 'rgba(8,12,20,0.92)',
-            borderColor: 'rgba(80,180,255,0.15)',
-            backdropFilter: 'blur(16px)',
-          }}
-        >
-          <div className="text-[10px] uppercase tracking-widest text-zinc-500 mb-2">
-            流量最低
-          </div>
-          <div className="space-y-1.5">
-            {leastBusy.length === 0 ? (
-              <div className="text-zinc-600 text-xs">等待資料...</div>
-            ) : (
-              leastBusy.map((c, i) => (
-                <div key={c.county} className="flex justify-between text-sm">
-                  <span className="text-zinc-300">
-                    <span className="text-zinc-600 mr-1.5">{i + 1}</span>
-                    {c.county}
-                  </span>
-                  <span className="text-zinc-500 font-mono text-xs">{c.total}</span>
-                </div>
-              ))
-            )}
-          </div>
+          <SignalLog snapshot={snapshot} paused={!isLive} />
         </div>
-
-        {snapshot && (
-          <div className="text-[10px] text-zinc-600 text-right px-1">
-            本幀 {snapshot.flows.length} 條連線
-          </div>
-        )}
       </div>
+
     </main>
   );
 }

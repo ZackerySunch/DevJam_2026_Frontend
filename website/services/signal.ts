@@ -1,16 +1,63 @@
 // services/signal.ts
 
-/** 單一流量：起點 → 終點 */
+/* ------------------------------------------------------------------ */
+/* 設定                                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 後端位置。
+ * 開發時直接打 localhost:8001；正式環境用 .env.local 覆蓋：
+ *   NEXT_PUBLIC_SIGNAL_API=https://api.holyping.com
+ * 若改用 next.config 的 rewrites 走同源代理，設成空字串即可。
+ */
+const API_BASE = process.env.NEXT_PUBLIC_SIGNAL_API ?? 'http://localhost:8001';
+const FLOWS_PATH = '/api/signal/traffic_flows';
+
+/** 全台骨幹 = -1 */
+export const ALL_COUNTIES = -1;
+
+const REQUEST_TIMEOUT_MS = 8000;
+
+/* ------------------------------------------------------------------ */
+/* 型別                                                                */
+/* ------------------------------------------------------------------ */
+
+/** 後端原始格式 */
+export interface RawTrafficFlow {
+  id: string;
+  type?: string;
+  from_name: string;
+  from_lat: number;
+  from_lng: number;
+  to_name: string;
+  to_lat: number;
+  to_lng: number;
+  traffic_mbps?: number;
+  bandwidth_mbps?: number;
+  load_percentage?: number;
+  status?: 'normal' | 'busy' | 'congested' | 'down' | string;
+  pulse_frequency?: number;
+  latency_ms?: number;
+}
+
+/** 前端用格式：單一流量 起點 → 終點 */
 export interface SignalFlow {
   id: string;
   /** [lng, lat] */
   source: [number, number];
   /** [lng, lat] */
   target: [number, number];
-  /** 流量權重 1 ~ 100 */
+  /** 負載 1 ~ 100（地圖會再收斂成 1~5 檔） */
   intensity: number;
   sourceCounty: string;
   targetCounty: string;
+  /** 後端建議的脈衝頻率（次/秒），地圖用來決定發送間隔 */
+  pulse?: number;
+  status?: string;
+  trafficMbps?: number;
+  latencyMs?: number;
+  fromName?: string;
+  toName?: string;
 }
 
 /** 縣市即時彙總 */
@@ -27,7 +74,10 @@ export interface SignalSnapshot {
   byCounty: CountyTraffic[];
 }
 
-/** 縣市代表座標（與 Navigator 對齊） */
+/* ------------------------------------------------------------------ */
+/* 縣市座標（與 Navigator 對齊，index 0-21 對應後端的 county 參數）    */
+/* ------------------------------------------------------------------ */
+
 export const COUNTY_COORDS: Record<string, [number, number]> = {
   基隆市: [121.7419, 25.1276],
   台北市: [121.5654, 25.033],
@@ -53,77 +103,147 @@ export const COUNTY_COORDS: Record<string, [number, number]> = {
   連江縣: [119.9363, 26.1505],
 };
 
-const COUNTIES = Object.keys(COUNTY_COORDS);
+export const COUNTIES = Object.keys(COUNTY_COORDS);
 
-function rand(min: number, max: number) {
-  return min + Math.random() * (max - min);
+/** 縣市名 → 後端要的 index */
+export function countyIndex(name: string): number {
+  const i = COUNTIES.indexOf(normalize(name));
+  return i < 0 ? ALL_COUNTIES : i;
 }
 
-function pickCounty(exclude?: string) {
-  let c = COUNTIES[Math.floor(Math.random() * COUNTIES.length)];
-  while (exclude && c === exclude) {
-    c = COUNTIES[Math.floor(Math.random() * COUNTIES.length)];
-  }
-  return c;
-}
+/* ------------------------------------------------------------------ */
+/* 轉換工具                                                            */
+/* ------------------------------------------------------------------ */
 
-/**
- * 模擬一幀即時流量
- * 之後換成：fetch('/api/signal/live').then(r => r.json())
- */
-export async function fetchSignalSnapshot(): Promise<SignalSnapshot> {
-  // 模擬網路延遲
-  await new Promise((r) => setTimeout(r, 40 + Math.random() * 80));
+/** 後端可能寫「臺北市」，我們的表是「台北市」 */
+const normalize = (s: string) => s.replace(/臺/g, '台');
 
-  const flowCount = 18 + Math.floor(Math.random() * 22); // 18~40 條
-  const flows: SignalFlow[] = [];
-  const agg = new Map<string, { inbound: number; outbound: number }>();
-
+/** 先用名稱比對，比不到就用座標找最近的縣市 */
+function resolveCounty(name: string, lng: number, lat: number): string {
+  const n = normalize(name ?? '');
   for (const c of COUNTIES) {
-    agg.set(c, { inbound: 0, outbound: 0 });
+    if (n.includes(c)) return c;
+  }
+  let best = COUNTIES[0];
+  let bestD = Infinity;
+  for (const c of COUNTIES) {
+    const [cx, cy] = COUNTY_COORDS[c];
+    const d = (cx - lng) ** 2 + (cy - lat) ** 2;
+    if (d < bestD) {
+      bestD = d;
+      best = c;
+    }
+  }
+  return best;
+}
+
+/** 負載 → 1~100。優先用 load_percentage，其次自己算 */
+function toIntensity(raw: RawTrafficFlow): number {
+  let v = raw.load_percentage;
+  if (!Number.isFinite(v as number)) {
+    const t = raw.traffic_mbps ?? 0;
+    const b = raw.bandwidth_mbps ?? 0;
+    v = b > 0 ? (t / b) * 100 : 50;
+  }
+  return Math.min(100, Math.max(1, Math.round(v as number)));
+}
+
+function toSignalFlow(raw: RawTrafficFlow): SignalFlow | null {
+  const { from_lat, from_lng, to_lat, to_lng } = raw;
+  if (
+    !Number.isFinite(from_lat) ||
+    !Number.isFinite(from_lng) ||
+    !Number.isFinite(to_lat) ||
+    !Number.isFinite(to_lng)
+  ) {
+    return null; // 座標壞掉的直接丟掉，不要讓地圖畫出鬼線
   }
 
-  for (let i = 0; i < flowCount; i++) {
-    const sourceCounty = pickCounty();
-    const targetCounty = pickCounty(sourceCounty);
-    const intensity = Math.round(rand(8, 100));
+  return {
+    id: raw.id,
+    source: [from_lng, from_lat],
+    target: [to_lng, to_lat],
+    intensity: toIntensity(raw),
+    sourceCounty: resolveCounty(raw.from_name, from_lng, from_lat),
+    targetCounty: resolveCounty(raw.to_name, to_lng, to_lat),
+    pulse: Number.isFinite(raw.pulse_frequency as number)
+      ? (raw.pulse_frequency as number)
+      : undefined,
+    status: raw.status,
+    trafficMbps: raw.traffic_mbps,
+    latencyMs: raw.latency_ms,
+    fromName: raw.from_name,
+    toName: raw.to_name,
+  };
+}
 
-    const src = COUNTY_COORDS[sourceCounty];
-    const tgt = COUNTY_COORDS[targetCounty];
+function aggregate(flows: SignalFlow[]): CountyTraffic[] {
+  const agg = new Map<string, { inbound: number; outbound: number }>();
+  for (const c of COUNTIES) agg.set(c, { inbound: 0, outbound: 0 });
 
-    // 在縣市中心附近加一點抖動，比較像真實基地台座標
-    const source: [number, number] = [
-      src[0] + rand(-0.12, 0.12),
-      src[1] + rand(-0.1, 0.1),
-    ];
-    const target: [number, number] = [
-      tgt[0] + rand(-0.12, 0.12),
-      tgt[1] + rand(-0.1, 0.1),
-    ];
-
-    flows.push({
-      id: `f-${Date.now()}-${i}`,
-      source,
-      target,
-      intensity,
-      sourceCounty,
-      targetCounty,
-    });
-
-    const s = agg.get(sourceCounty)!;
-    const t = agg.get(targetCounty)!;
-    s.outbound += intensity;
-    t.inbound += intensity;
+  for (const f of flows) {
+    const w = Math.round(f.trafficMbps ?? f.intensity);
+    agg.get(f.sourceCounty)!.outbound += w;
+    agg.get(f.targetCounty)!.inbound += w;
   }
 
-  const byCounty: CountyTraffic[] = COUNTIES.map((county) => {
+  return COUNTIES.map((county) => {
     const { inbound, outbound } = agg.get(county)!;
     return { county, inbound, outbound, total: inbound + outbound };
   }).sort((a, b) => b.total - a.total);
+}
 
-  return {
-    timestamp: Date.now(),
-    flows,
-    byCounty,
-  };
+/* ------------------------------------------------------------------ */
+/* 主要 API                                                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 取得即時流向。
+ * @param county 縣市 index 0-21，省略或 -1 = 全台骨幹
+ * @param signal 外部 AbortSignal（元件卸載時中斷用）
+ */
+export async function fetchSignalSnapshot(
+  county: number = ALL_COUNTIES,
+  signal?: AbortSignal
+): Promise<SignalSnapshot> {
+  const url = `${API_BASE}${FLOWS_PATH}?county=${county}`;
+
+  // 自己的逾時 + 外部的取消，兩個都要能中斷
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
+  const onAbort = () => ctrl.abort();
+  signal?.addEventListener('abort', onAbort);
+
+  try {
+    const res = await fetch(url, {
+      cache: 'no-store',
+      headers: { Accept: 'application/json' },
+      signal: ctrl.signal,
+    });
+
+    if (!res.ok) {
+      throw new Error(`Signal API ${res.status} ${res.statusText}`);
+    }
+
+    const json = await res.json();
+    // 後端直接回陣列；若之後包成 { data: [...] } 也接得住
+    const rawList: RawTrafficFlow[] = Array.isArray(json)
+      ? json
+      : Array.isArray(json?.data)
+      ? json.data
+      : [];
+
+    const flows = rawList
+      .map(toSignalFlow)
+      .filter((f): f is SignalFlow => f !== null);
+
+    return {
+      timestamp: Date.now(),
+      flows,
+      byCounty: aggregate(flows),
+    };
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', onAbort);
+  }
 }

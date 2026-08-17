@@ -13,6 +13,16 @@ import DensityMap from './DensityMap';
 import ControlPanel from './ControlPanel';
 import TimelinePlayer from './TimelinePlayer';
 
+/**
+ * 進場後多久自動開始播放（毫秒）。
+ * 要比地圖的開場動畫久一點，讓「白光台灣 → 長出資料」先演完，
+ * 時間軸才接手，不然兩個動畫會打在一起。
+ *
+ * 地圖那邊：INTRO_DELAY 400 + INTRO_DURATION 2800 + REVEAL_DELAY 260
+ *          + 顏色/高度過場 900 ≈ 4360ms
+ */
+const AUTOPLAY_DELAY = 4200;
+
 export default function DensityContainer() {
   const [data, setData] = useState<DensityResponse | null>(null);
   const [provider, setProvider] = useState<ProviderType>('CHT');
@@ -21,6 +31,8 @@ export default function DensityContainer() {
   const [timeKeys, setTimeKeys] = useState<string[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
+  /** 自動播放只做一次；之後播放與暫停完全由使用者決定 */
+  const [autoStarted, setAutoStarted] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -31,6 +43,7 @@ export default function DensityContainer() {
         const keys = Object.keys(result).sort();
         setTimeKeys(keys);
         setCurrentIndex(0);
+        // 🌟 這裡不再強制暫停：切換業者時如果本來在播，就從頭繼續播
       }
     };
     loadData();
@@ -39,21 +52,25 @@ export default function DensityContainer() {
     };
   }, [provider]);
 
+  // 🌟 使用者一進來就自動播放
   useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (isPlaying && timeKeys.length > 0) {
-      interval = setInterval(() => {
-        setCurrentIndex((prev) => {
-          if (prev >= timeKeys.length - 1) {
-            setIsPlaying(false);
-            return prev;
-          }
-          return prev + 1;
-        });
-      }, 800);
+    if (autoStarted) return;
+    if (timeKeys.length < 2) return; // 資料還沒到、或只有一格就不用播
+
+    // 使用者若在系統設定關掉動畫，就尊重他，不自動播
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (reduceMotion) {
+      setAutoStarted(true);
+      return;
     }
-    return () => clearInterval(interval);
-  }, [isPlaying, timeKeys.length]);
+
+    const timer = window.setTimeout(() => {
+      setIsPlaying(true);
+      setAutoStarted(true);
+    }, AUTOPLAY_DELAY);
+
+    return () => window.clearTimeout(timer);
+  }, [autoStarted, timeKeys.length]);
 
   const currentTimeKey = timeKeys[currentIndex] || '';
   const currentMapData = data && currentTimeKey ? data[currentTimeKey] : {};
